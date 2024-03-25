@@ -117,7 +117,7 @@ class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
                                                                   self.tr('Carta de Trafegabilidade')))
 
 
-    def processAlgorithm(self, parameters, context, feedback):
+        def processAlgorithm(self, parameters, context, feedback):
         via_deslocamento = self.parameterAsVectorLayer(parameters, self.VIA_DESLOCAMENTO, context)
         vegetacao = self.parameterAsVectorLayer(parameters, self.VEGETACAO, context)
         massa_dagua = self.parameterAsVectorLayer(parameters, self.MASSA_DAGUA, context)
@@ -125,44 +125,105 @@ class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
         contruida = self.parameterAsVectorLayer(parameters, self.AREA_CONSTRUIDA, context)
         sem_dados = self.parameterAsVectorLayer(parameters, self.AREA_SEM_DADOS, context)
 
-        #Preparação de camadas intermédias
+        
+        expressao_filtro = "\"administracao\" = 'Desconhecida'"
+
+        via_deslocamento_filtrada = processing.run("native:extractbyexpression", {
+            'INPUT': parameters[self.VIA_DESLOCAMENTO],
+            'EXPRESSION': expressao_filtro,
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        via_deslocamento_filtrada_desc = processing.run("qgis:extractbyexpression", {
+            'INPUT': parameters[self.VEGETACAO],
+            'EXPRESSION': "\"tipo\" = 0",
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        floresta_densa_esparsa = processing.run("qgis:extractbyexpression", {
+            'INPUT': parameters[self.VEGETACAO],
+            'EXPRESSION': "\"tipo\" = 601 OR \"tipo\" = 602",
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        vegetacao_restritiva = processing.run("qgis:extractbyexpression", {
+            'INPUT': parameters[self.VEGETACAO],
+            'EXPRESSION': "\"tipo\" != 601 AND \"tipo\" != 602 AND \"tipo\" != 1000",
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        terreno_exposto_desconhecido = processing.run("qgis:extractbyexpression", {
+            'INPUT': parameters[self.VEGETACAO],
+            'EXPRESSION': "\"tipo\" = 1000",
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+
+
+        buffer_via_deslocamento_filtrada_desc = processing.run("native:buffer", {
+            'INPUT': via_deslocamento_filtrada_desc,
+            'DISTANCE': parameters[self.DIST_BUFFER_VIA],
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
 
         buffer_via_deslocamento = processing.run("native:buffer", {
             'INPUT': via_deslocamento,
             'DISTANCE': parameters[self.DIST_BUFFER_VIA],
             'OUTPUT': 'memory:'
         }, context=context, feedback=feedback)['OUTPUT']
-
+        
+        buffer_via_deslocamento_filtrofedest = processing.run("native:buffer", {
+            'INPUT': via_deslocamento_filtrada,
+            'DISTANCE': parameters[self.DIST_BUFFER_VIA],
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        buffer_vegetacao_restritiva = processing.run("native:buffer", {
+            'INPUT': vegetacao_restritiva,
+            'DISTANCE': parameters[self.DIST_BUFFER_MATA_CILIAR],
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        buffer_floresta_densa_esparsa = processing.run("native:buffer", {
+            'INPUT': floresta_densa_esparsa,
+            'DISTANCE': parameters[self.DIST_BUFFER_MATA_CILIAR],
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
+        buffer_terreno_exposto_desconhecido = processing.run("native:buffer", {
+            'INPUT': terreno_exposto_desconhecido,
+            'DISTANCE': parameters[self.DIST_BUFFER_MATA_CILIAR],
+            'OUTPUT': 'memory:'
+        }, context=context, feedback=feedback)['OUTPUT']
+        
         buffer_mata_ciliar = processing.run("native:buffer", {
             'INPUT': vegetacao,
             'DISTANCE': parameters[self.DIST_BUFFER_MATA_CILIAR],
             'OUTPUT': 'memory:'
         }, context=context, feedback=feedback)['OUTPUT']
-
+        
         buffer_trecho_drenagem = processing.run("native:buffer", {
             'INPUT': DRENAGEM,
             'DISTANCE': parameters[self.DIST_BUFFER_TRECHO],
             'OUTPUT': 'memory:'
         }, context=context, feedback=feedback)['OUTPUT']
-
-        # Classificação das áreas
-        camadas_impeditivas = [vegetacao, massa_dagua, buffer_trecho_drenagem, buffer_mata_ciliar]  # Substitua pelos nomes corretos das suas variáveis
+#Camadas finais
+        camadas_impeditivas = [buffer_floresta_densa_esparsa, massa_dagua, buffer_trecho_drenagem, buffer_mata_ciliar]  
         camada_impeditiva_combinada = processing.run("qgis:mergevectorlayers", {
             'LAYERS': camadas_impeditivas,
             'OUTPUT': 'memory:'
         }, context=context, feedback=feedback)['OUTPUT']
-
-        camadas_restritivo = [vegetacao, contruida, buffer_via_deslocamento]  # Substitua pelos nomes corretos das suas variáveis
+        
+        camadas_restritivo = [buffer_vegetacao_restritiva, contruida, buffer_via_deslocamento_filtrofedest]  
         camada_restritivo_combinada = processing.run("qgis:mergevectorlayers", {
             'LAYERS': camadas_restritivo,
             'OUTPUT': 'memory:'
         }, context=context, feedback=feedback)['OUTPUT']
-        camadas_adequado = [vegetacao, via_deslocamento]  # Substitua pelos nomes corretos das suas variáveis
+        camadas_adequado = [buffer_terreno_exposto_desconhecido, via_deslocamento_filtrada_desc]  
         camada_adequado_combinada = processing.run("qgis:mergevectorlayers", {
             'LAYERS': camadas_adequado,
             'OUTPUT': 'memory:'
         }, context=context, feedback=feedback)['OUTPUT']
-        camadas_desconhecido = [sem_dados]  # Substitua pelos nomes corretos das suas variáveis
+        camadas_desconhecido = [sem_dados]  
         camada_desconhecido_combinada = processing.run("qgis:mergevectorlayers", {
             'LAYERS': camadas_desconhecido,
             'OUTPUT': 'memory:'
