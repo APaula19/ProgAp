@@ -1,10 +1,10 @@
 Plugin Builder Results
 
-Your plugin ProgramacaoAplicadaGrupoX was created in:
-    C:/Users/Documents\programacao_aplicada_grupo_x
+Your plugin ProgramacaoAplicadaGrupo3 was created in:
+    C:/Users/anapp/Downloads/Proj1\programacao_aplicada_grupo_3
 
 Your QGIS plugin directory is located at:
-    C:/Users/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins
+    C:/Users/anapp/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins
 
 What's Next:
 
@@ -15,7 +15,7 @@ What's Next:
 
   * Test the plugin by enabling it in the QGIS plugin manager
 
-  * Customize it by editing the implementation file: ``programacao_aplicada_grupo_X.py``
+  * Customize it by editing the implementation file: ``programacao_aplicada_grupo_3.py``
 
   * You can use the Makefile to compile your Ui and resource files when
     you make changes. This requires GNU make (gmake)

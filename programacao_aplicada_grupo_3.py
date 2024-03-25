@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 """
 /***************************************************************************
  ProgramacaoAplicadaGrupo3
@@ -19,21 +20,41 @@
  *   (at your option) any later version.                                   *
  *                                                                         *
  ***************************************************************************/
- This script initializes the plugin, making it known to QGIS.
 """
 
 __author__ = 'Grupo 3'
 __date__ = '2024-03-24'
 __copyright__ = '(C) 2024 by Grupo 3'
 
+# This will get replaced with a git SHA1 when you do a git archive
 
-# noinspection PyPep8Naming
-def classFactory(iface):  # pylint: disable=invalid-name
-    """Load ProgramacaoAplicadaGrupo3 class from file ProgramacaoAplicadaGrupo3.
+__revision__ = '$Format:%H$'
 
-    :param iface: A QGIS interface instance.
-    :type iface: QgsInterface
-    """
-    #
-    from .programacao_aplicada_grupo_3 import ProgramacaoAplicadaGrupo3Plugin
-    return ProgramacaoAplicadaGrupo3Plugin()
+import os
+import sys
+import inspect
+
+from qgis.core import QgsProcessingAlgorithm, QgsApplication
+from .programacao_aplicada_grupo_3_provider import ProgramacaoAplicadaGrupo3Provider
+
+cmd_folder = os.path.split(inspect.getfile(inspect.currentframe()))[0]
+
+if cmd_folder not in sys.path:
+    sys.path.insert(0, cmd_folder)
+
+
+class ProgramacaoAplicadaGrupo3Plugin(object):
+
+    def __init__(self):
+        self.provider = None
+
+    def initProcessing(self):
+        """Init Processing provider for QGIS >= 3.8."""
+        self.provider = ProgramacaoAplicadaGrupo3Provider()
+        QgsApplication.processingRegistry().addProvider(self.provider)
+
+    def initGui(self):
+        self.initProcessing()
+
+    def unload(self):
+        QgsApplication.processingRegistry().removeProvider(self.provider)
