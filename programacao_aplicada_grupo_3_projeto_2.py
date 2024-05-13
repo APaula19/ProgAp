@@ -105,12 +105,14 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
 
     def processAlgorithm(self, parameters, context, feedback):
         # OBJETIVO 1
+        #Definições iniciais e seleção dos parametros
         escala = self.ESCALAS[parameters[self.ESCALA_PARAMETER]]
         equidistancia = self.obter_equidistancia(escala)
         mdt_layer = self.parameterAsRasterLayer(parameters, self.MDT_PARAMETER, context)
         curvas_nivel_layer = self.parameterAsVectorLayer(parameters, self.CURVAS_NIVEL_PARAMETER, context)
         fields = curvas_nivel_layer.fields()
 
+        #Criação da camada de memória
         feedback.pushInfo('Gerando a nova camada de Cuvas de Nível')
         mem_layer = QgsVectorLayer("LineString?crs=EPSG:4674", "result", "memory")
         provider = mem_layer.dataProvider()
@@ -118,6 +120,7 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
         provider.addAttributes([QgsField('tipo', QVariant.String)])
         mem_layer.updateFields()
 
+      #Cada curva de nível é examinada para determinar se é uma curva mestra ou normal, com base em sua cota e na equidistância.
         for feature in curvas_nivel_layer.getFeatures():
             cota = feature['cota']
             if cota % equidistancia == 0:
@@ -133,7 +136,7 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
             feedback.pushWarning("A nova camada de curvas de nível está vazia.")
         else:
             feedback.pushInfo(f"A nova camada de curvas de nível resultante contém {mem_layer.featureCount()} feições e foi gerada com sucesso.")
-
+      #Salvando a camada memoria
         save_options = QgsVectorFileWriter.SaveVectorOptions()
         temp_file_name = f'output_memory_{uuid.uuid4()}'
         writer_error, error_message, new_filename, output_format = QgsVectorFileWriter.writeAsVectorFormatV3(
@@ -164,6 +167,44 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
         QgsProject.instance().addMapLayer(layer)
 
         # OBJETIVO 2
+      # # Etapa 1: Criar uma camada de pontos em grade com base no raster do MDT
+
+      #   # Executa o algoritmo "Pixels de raster para pontos"
+      #   feedback.pushInfo('Convertendo raster para pontos...')
+      #   #result = processing.run("native:pixelstopoints", {'INPUT_RASTER':mdt_layer,'RASTER_BAND':1,'FIELD_NAME':'cota','OUTPUT':'TEMPORARY_OUTPUT'})
+      #   resultado_processing = processing.run("native:pixelstopoints", {'INPUT_RASTER':mdt_layer,'RASTER_BAND':1,'FIELD_NAME':'cota','OUTPUT':'TEMPORARY_OUTPUT'})
+      #   pontos_layer = resultado_processing['OUTPUT']
+      #   feedback.pushInfo('MDT transformado para grade de pontos.')
+
+      # Etapa 2: Calcular o atributo 'altitude' para cada tipo de camada de pista de pouso
+
+      # # Calcula a altitude para a camada de pontos de pista de pouso
+      #   feedback.pushInfo('Calculando a nova camada de pista de pouso (pontos) com as altitudes.')
+
+      #   nova_camada_pontos = self.calcular_altitude_pontos(pista_pontos_layer, pontos_layer, context, feedback)
+
+      #   feedback.pushInfo('Nova camada de pista de pouso (pontos) calculada com sucesso.')
+
+
+      #   # Calcula a altitude para a camada de linhas de pista de pouso
+      #   feedback.pushInfo('Calculando a nova camada de pista de pouso (linhas) com as altitudes.')
+
+      #   nova_camada_linhas = self.calcular_altitude_linhas(pista_linhas_layer, pontos_layer, context, feedback)
+
+      #   feedback.pushInfo('Nova camada de pista de pouso (linhas) calculada com sucesso.')
+
+
+      #   # Calcula a altitude para a camada de polígonos de pista de pouso
+      #   feedback.pushInfo('Calculando a nova camada de pista de pouso (poligonos) com as altitudes.')
+
+      #   nova_camada_poligonos = self.calcular_altitude_poligonos(pista_poligonos_layer, pontos_layer, context, feedback)
+
+      #   feedback.pushInfo('Nova camada de pista de pouso (poligonos) calculada com sucesso.')        
+
+
+      #   return {self.OUTPUT_CURVAS_NIVEL: layer, self.OUTPUT_PISTA_P: nova_camada_pontos, self.OUTPUT_PISTA_L: nova_camada_linhas, self.OUTPUT_PISTA_A: nova_camada_poligonos}
+
+      
         feedback.pushInfo('Identificando o ponto mais alto dentro de demarcações de curva de nível')
         pontos_layer = self.parameterAsVectorLayer(parameters, 'CURVAS_NIVEL', context)
         index = QgsSpatialIndex(pontos_layer.getFeatures())
@@ -178,6 +219,8 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
             altura_maxima = float('-inf')
 
             #Analisando se a geometria da curva e do ponto são polígonos
+            #Verifica se a geometria da curva é um polígono e se os pontos são do tipo ponto.
+            #Checa se o ponto está dentro da curva e se está contido na área designada para cotação.
             if curva_geom.wkbType() == QgsWkbTypes.Polygon and ponto_geometry.wkbType() == QgsWkbTypes.Point:
                 for ponto_feature in pontos_layer.getFeatures():
                     ponto_geom = ponto_feature.geometry()
@@ -348,7 +391,7 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
                 altitude_formatada = round(altitude_media, 1)
                 feature['altitude'] = altitude_formatada
                 provider.addFeature(feature)
-
+        #Se houver pontos dentro do buffer, a média das altitudes é calculada
         # Verificar se a camada de memória está vazia
         if nova_camada_linhas.featureCount() == 0:
             feedback.pushWarning("A camada pista linhas está vazia.")
