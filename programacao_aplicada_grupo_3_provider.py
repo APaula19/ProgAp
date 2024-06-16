@@ -31,7 +31,10 @@ __copyright__ = '(C) 2024 by Grupo 3'
 __revision__ = '$Format:%H$'
 
 from qgis.core import QgsProcessingProvider
-from .programacao_aplicada_grupo_3_algorithm import ProgramacaoAplicadaGrupo3Algorithm
+from .algorithms.Projeto1.solucao import TrafegabilidadeAlgorithm
+from .algorithms.Projeto2.solucao import CriarCamadasCurvasNivelMod
+from .algorithms.Projeto3.solucao import IdentificarMudancas
+from .algorithms.Projeto4.solucao import IdentificarMudancas2
 
 
 class ProgramacaoAplicadaGrupo3Provider(QgsProcessingProvider):
@@ -53,9 +56,10 @@ class ProgramacaoAplicadaGrupo3Provider(QgsProcessingProvider):
         """
         Loads all algorithms belonging to this provider.
         """
-        self.addAlgorithm(ProgramacaoAplicadaGrupo3Algorithm())
-        # add additional algorithms here
-        # self.addAlgorithm(MyOtherAlgorithm())
+        self.addAlgorithm(TrafegabilidadeAlgorithm())
+        self.addAlgorithm(CriarCamadasCurvasNivelMod())
+        self.addAlgorithm(IdentificarMudancas())
+        self.addAlgorithm(IdentificarMudancas2())
 
     def id(self):
         """
