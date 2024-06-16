@@ -214,5 +214,5 @@ class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
             'OUTPUT': 'memory:'})
 
 #Fechar dataset
-out_band.FlushCache()
-out_ds = None
+#out_band.FlushCache()
+#out_ds = None
