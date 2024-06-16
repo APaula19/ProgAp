@@ -37,8 +37,12 @@ __copyright__ = '(C) 2024 by Grupo 3'
 
 __revision__ = '$Format:%H$'
 
+
+
+
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
+                       QgsApplication,
                        QgsFeatureSink,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterFeatureSource,
@@ -51,6 +55,9 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingUtils)
 from qgis import processing
 
+#QgsApplication.setPrefixPath("C:/Program Files/QGIS <versão>", True)
+#qgs = QgsApplication([], False)
+#qgs.initQgis()
 
 class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
     #Definindo os identificadores de seus parâmetros input e output
@@ -147,13 +154,13 @@ class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
                                                                   self.tr('Carta de Trafegabilidade')))
 
 
-        def processAlgorithm(self, parameters, context, feedback):
-            via_deslocamento = self.parameterAsVectorLayer(parameters, self.VIA_DESLOCAMENTO, context)
-            vegetacao = self.parameterAsVectorLayer(parameters, self.VEGETACAO, context)
-            massa_dagua = self.parameterAsVectorLayer(parameters, self.MASSA_DAGUA, context)
-            DRENAGEM = self.parameterAsVectorLayer(parameters, self.TRECHO_DRENAGEM, context)
-            contruida = self.parameterAsVectorLayer(parameters, self.AREA_CONSTRUIDA, context)
-            sem_dados = self.parameterAsVectorLayer(parameters, self.AREA_SEM_DADOS, context)
+    def processAlgorithm(self, parameters, context, feedback):
+        via_deslocamento = self.parameterAsVectorLayer(parameters, self.VIA_DESLOCAMENTO, context)
+        vegetacao = self.parameterAsVectorLayer(parameters, self.VEGETACAO, context)
+        massa_dagua = self.parameterAsVectorLayer(parameters, self.MASSA_DAGUA, context)
+        DRENAGEM = self.parameterAsVectorLayer(parameters, self.TRECHO_DRENAGEM, context)
+        contruida = self.parameterAsVectorLayer(parameters, self.AREA_CONSTRUIDA, context)
+        sem_dados = self.parameterAsVectorLayer(parameters, self.AREA_SEM_DADOS, context)
 
         
         expressao_filtro = "\"administracao\" = 'Desconhecida'"
