@@ -1,460 +1,644 @@
-#importando os módulos
-from qgis.PyQt.QtCore import QVariant
-from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QCheckBox, QDialogButtonBox
-from qgis.core import (QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource, 
-                       QgsProcessingParameterField, QgsProcessingParameterNumber, QgsProcessingParameterFeatureSink,
-                       QgsFeatureSink, QgsFeature, QgsGeometry, QgsVectorLayer, QgsField, QgsProject)
+from qgis.core import (
+    QgsProcessingAlgorithm,
+    QgsProcessingParameterVectorLayer,
+    QgsProcessingParameterFeatureSink,
+    QgsProcessingParameterBoolean,
+    QgsField,
+    QgsFeature,
+    QgsGeometry,
+    QgsPointXY,
+    QgsProcessingContext,
+    QgsProcessingFeedback,
+    QgsProcessingException,
+    QgsProcessingOutputVectorLayer,
+)
+from qgis import processing
+from PyQt5.QtCore import QVariant
+import processing
+class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
 
-#definindo classe e inputs
-class IdentificarMudancas2(QgsProcessingAlgorithm):
-    INPUT_LAYER_1 = 'INPUT_LAYER_1'
-    INPUT_LAYER_2 = 'INPUT_LAYER_2'
-    PONTOS_TRACKER = 'PONTOS_TRACKER'
-    CHAVE_PRIMARIA = 'CHAVE_PRIMARIA'
-    TOLERANCIA = 'TOLERANCIA'
-    ATRIBUTOS_IGNORADOS = 'ATRIBUTOS_IGNORADOS'
-    OUTPUT_LAYER = 'OUTPUT_LAYER'
+    INPUT_LINE_LAYER = 'INPUT_LINE_LAYER'
+    OUTPUT_POINT_LAYER = 'OUTPUT_POINT_LAYER'
+    CLASSIFY_FEATURES = 'CLASSIFY_FEATURES'
 
-    #usando initAlgorithm para iniciailizar todos os parâmtros  
     def initAlgorithm(self, config=None):
         self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT_LAYER_1,
-                'Camada do dia 1',
-                [QgsProcessing.TypeVectorAnyGeometry]
+            QgsProcessingParameterVectorLayer(
+                self.INPUT_LINE_LAYER,
+                'Input Line Layer',
+                [QgsProcessing.TypeVectorLine]
             )
         )
-
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT_LAYER_2,
-                'Camada do dia 2',
-                [QgsProcessing.TypeVectorAnyGeometry]
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.PONTOS_TRACKER,
-                'Camada de pontos (tracker)',
-                [QgsProcessing.TypeVectorPoint]
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterField(
-                self.CHAVE_PRIMARIA,
-                'Atributo correspondente à chave primária',
-                parentLayerParameterName=self.INPUT_LAYER_1,
-                type=QgsProcessingParameterField.Any
-            )
-        )
-
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.TOLERANCIA,
-                'Distância de tolerância (metros)',
-                type=QgsProcessingParameterNumber.Double,
-                defaultValue=2.0
-            )
-        )
-
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.OUTPUT_LAYER,
-                'Camada de mudanças'
+                self.OUTPUT_POINT_LAYER,
+                'Output Point Layer'
             )
         )
-    #início do processing principal
-    def processAlgorithm(self, parameters, context, feedback):
-        #camadas e parâmetros fornecidos pelo usuário
-        camada_dia_1 = self.parameterAsSource(parameters, self.INPUT_LAYER_1, context)
-        camada_dia_2 = self.parameterAsSource(parameters, self.INPUT_LAYER_2, context)
-        camada_pontos = self.parameterAsSource(parameters, self.PONTOS_TRACKER, context)
-        chave_primaria = self.parameterAsString(parameters, self.CHAVE_PRIMARIA, context)
-        tolerancia = self.parameterAsDouble(parameters, self.TOLERANCIA, context)
-
-        #lista com os atributos a serem ignorados
-        atributos_ignorados = self.get_ignored_attributes(camada_dia_1)
-
-        #lista com os atributos que devem ser comparados
-        atributos_comparar = [field.name() for field in camada_dia_1.fields() if field.name() not in atributos_ignorados]
-
-      #criamos a camada de saída 
-        (sink, dest_id) = self.parameterAsSink(
-            parameters,
-            self.OUTPUT_LAYER,
-            context,
-            camada_dia_1.fields(),
-            camada_dia_1.wkbType(),
-            camada_dia_1.sourceCrs()
+        self.addParameter(
+            QgsProcessingParameterBoolean(
+                self.CLASSIFY_FEATURES,
+                'Classify Features',
+                defaultValue=True
+            )
         )
 
-        #identificamos mudanças entre as camadas
-        self.identificar_mudancas(camada_dia_1, camada_dia_2, sink, atributos_comparar, chave_primaria, tolerancia, context, feedback)
+    def processAlgorithm(self, parameters, context, feedback):
+        # Obter os parâmetros
+        input_line_layer = self.parameterAsVectorLayer(parameters, self.INPUT_LINE_LAYER, context)
+        output_point_layer = self.parameterAsSink(parameters, self.OUTPUT_POINT_LAYER, context, input_line_layer.fields(), QgsWkbTypes.Point, input_line_layer.crs())
+        classify_features = self.parameterAsBool(parameters, self.CLASSIFY_FEATURES, context)
 
-        return {self.OUTPUT_LAYER: dest_id}
+        # Lista para armazenar as feições inválidas
+        invalid_features = []
 
-    #método para obter os atributos a serem ignorados, de forma que formem uma lista para o usuário selecionar
-    def get_ignored_attributes(self, layer):
-        dialog = AtributosDialog([field.name() for field in layer.fields()])
-        if dialog.exec_() == QDialog.Accepted:
-            return dialog.get_selected_atributos()
-        else:
-            return []
+        nr_pistas_idx = input_line_layer.fields().indexOf("nr_pistas")
+        nr_faixas_idx = input_line_layer.fields().indexOf("nr_faixas")
 
-     #definindo a função que vai identificar as mudanças e classificar 
-    def identificar_mudancas(self, camada_dia_1, camada_dia_2, sink, atributos_comparar, chave_primaria, tolerancia, context, feedback):
-      #usamos a função wkbtype para conseguirmos colocar qualquer geometria na camada de entrada 
-        geom_type = camada_dia_1.wkbType()
-      #cria um dicionário com os IDs e as feições da camada do dia 2 para acesso rápido
-        ids_dia_2 = {feature.attribute(chave_primaria): feature for feature in camada_dia_2.getFeatures()}
+        # Verificar se os campos "nr_pistas" e "nr_faixas" existem
+        if nr_pistas_idx == -1 or nr_faixas_idx == -1:
+            raise QgsProcessingException(f"Os campos 'nr_pistas' ou 'nr_faixas' não foram encontrados na camada '{input_line_layer.name()}'.")
+        
+        # Verificar e corrigir feições inválidas
+        total_count = input_line_layer.featureCount()
+        step = 10  # Processar em lotes de 10 feições
+        current_count = 0
 
-       #itera sobre as camadas do dia 1, obtem id e geometria do dia 1 e busca correspondente no dia 2
-        for feature_dia_1 in camada_dia_1.getFeatures():
-            if feedback.isCanceled():
-                break
-            id_dia_1 = feature_dia_1.attribute(chave_primaria)
-            geom_dia_1 = feature_dia_1.geometry()
-            
-            feature_proxima = ids_dia_2.get(id_dia_1, None)
+        for feature in input_line_layer.getFeatures():
+            nr_pistas_value = feature["nr_pistas"]
+            nr_faixas_value = feature["nr_faixas"]
 
-            if feature_proxima:
-              #compara mudanças, olha se a geometria mudou
-                mudancas = comparar_atributos(feature_dia_1, feature_proxima, atributos_comparar)
-                if not geom_dia_1.equals(feature_proxima.geometry()):
-                    mudancas.append("geometria")
-                if mudancas:
-                    tipo_mudanca = "Modificada"
-                    nova_feature = QgsFeature()
-                    nova_feature.setGeometry(geom_dia_1)
-                    nova_feature.setAttributes([id_dia_1, tipo_mudanca, ", ".join(mudancas)])
-                    sink.addFeature(nova_feature, QgsFeatureSink.FastInsert)
-            else:
-                tipo_mudanca = "Removida"
-                nova_feature = QgsFeature()
-                nova_feature.setGeometry(geom_dia_1)
-                nova_feature.setAttributes([id_dia_1, tipo_mudanca, ""])
-                sink.addFeature(nova_feature, QgsFeatureSink.FastInsert)
-              
-        #segue os mesmos passos comparando o dia 1 com o dia 2
-        ids_dia_1 = {feature.attribute(chave_primaria) for feature in camada_dia_1.getFeatures()}
+            # Converter valores para inteiros se possível
+            try:
+                nr_pistas_value = int(nr_pistas_value)
+            except (TypeError, ValueError):
+                nr_pistas_value = 1  # Valor padrão se a conversão falhar
 
-        for feature_dia_2 in camada_dia_2.getFeatures():
-            if feedback.isCanceled():
-                break
-            id_dia_2 = feature_dia_2.attribute(chave_primaria)
-            geom_dia_2 = feature_dia_2.geometry()
+            try:
+                nr_faixas_value = int(nr_faixas_value)
+            except (TypeError, ValueError):
+                nr_faixas_value = 1  # Valor padrão se a conversão falhar
 
-            if id_dia_2 not in ids_dia_1:
-                tipo_mudanca = "Adicionada"
-                nova_feature = QgsFeature()
-                nova_feature.setGeometry(geom_dia_2)
-                nova_feature.setAttributes([id_dia_2, tipo_mudanca, ""])
-                sink.addFeature(nova_feature, QgsFeatureSink.FastInsert)
-              
-    #apenas define nome e nome a ser exibido
-    def name(self):
-        return 'identificar_mudancas'
+            # Garantir que os valores sejam no mínimo 1
+            if nr_pistas_value < 1:
+                nr_pistas_value = 1
+            if nr_faixas_value < 1:
+                nr_faixas_value = 1
 
-    def displayName(self):
-        return 'Identificar Mudanças'
+            # Verificar se nr_pistas é maior que nr_faixas ou se algum dos valores é menor que 1
+            if nr_pistas_value > nr_faixas_value or nr_pistas_value < 1 or nr_faixas_value < 1:
+                invalid_features.append(feature)
 
-    def group(self):
-        return 'Exemplo de Algoritmo'
+            # Criar feições na camada de ponto se necessário
+            if classify_features:
+                point_feature = QgsFeature()
+                point_geometry = QgsGeometry.fromPointXY(feature.geometry().pointOnSurface())
+                point_feature.setGeometry(point_geometry)
+                point_feature.setAttributes(feature.attributes())
+                output_point_layer.addFeature(point_feature, QgsFeatureSink.FastInsert)
 
-    def groupId(self):
-        return 'exemplo_algoritmo'
+            # Atualizar o progresso a cada lote processado
+            current_count += 1
+            if current_count % step == 0:
+                feedback.setProgress(int(current_count / total_count * 100))
+
+        # Transformar a camada de linha em pontos
+        self.create_point_layer_from_line_layer(input_line_layer, output_point_layer)
+
+        # Validar os pontos e plotar erros
+        self.validate_points()
+
+        # Retorna resultados
+        return {self.OUTPUT_POINT_LAYER: output_point_layer}
+
+    def create_point_layer_from_line_layer(self, line_layer, output_point_layer):
+        # Cria uma nova camada de ponto
+        point_layer = QgsVectorLayer('Point?crs=' + line_layer.crs().authid(), output_point_layer.name(), 'memory')
+        point_layer_data = point_layer.dataProvider()
+
+        # Copia todos os campos da camada de linha para a camada de ponto
+        point_layer_data.addAttributes(line_layer.fields().toList())
+        point_layer.updateFields()
+
+        point_layer.startEditing()
+
+        # Percorre todos os recursos na camada de linha
+        for feature in line_layer.getFeatures():
+            geometry = feature.geometry()
+            if geometry is None:
+                continue
+
+            # Obtém os vértices da linha
+            for vertex in geometry.vertices():
+                point_feature = QgsFeature(point_layer.fields())
+                point_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(vertex.x(), vertex.y())))
+                point_feature.setAttributes(feature.attributes())
+                point_layer.addFeature(point_feature)
+
+        point_layer.commitChanges()
+
+        # Adiciona a nova camada de ponto ao projeto QGIS
+        QgsProject.instance().addMapLayer(point_layer)
+        print(f"Camada de ponto '{output_point_layer.name()}' criada a partir da camada de linha '{line_layer.name()}'.")
+
+    def validate_points(self):
+        # Obter as camadas
+        infra_elemento_viario_p = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_elemento_viario_p")[0]
+        infra_via_deslocamento_p = QgsProject.instance().mapLayersByName("infra_via_deslocamento_p")[0]
+
+        # Filtrar pontos da camada infra_elemento_viario_p com tipo = 203
+        infra_elemento_viario_p_203 = {feat.id(): feat for feat in infra_elemento_viario_p.getFeatures() if feat["tipo"] == 203}
+
+        # Verificar pontos que satisfazem a regra 3
+        common_ids = set(infra_elemento_viario_p_203.keys()) & {feat.id() for feat in infra_via_deslocamento_p.getFeatures()}
+
+        # Verificar pontos que satisfazem a regra 4
+        via_deslocamento_layer = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_via_deslocamento_l")[0]
+        vertices_via_deslocamento = {QgsPointXY(vertex.x(), vertex.y()) for feature in via_deslocamento_layer.getFeatures() for vertex in feature.geometry().vertices()}
+
+        valid_points = {feat_id for feat_id in common_ids if QgsPointXY(infra_elemento_viario_p_203[feat_id].geometry().asPoint()) in vertices_via_deslocamento}
+
+        # Verificar atributos nr_pistas, nr_faixas e situacao_fisica
+        error_layer = QgsVectorLayer("Point?crs=" + infra_via_deslocamento_p.crs().authid(), "Erro_Regra_5", "memory")
+        error_provider = error_layer.dataProvider()
+
+        error_provider.addAttributes([QgsField("ID", QVariant.Int), QgsField("Classificacao", QVariant.String)])
+        error_layer.updateFields()
+
+        error_layer.startEditing()
+
+        for feat_id in valid_points:
+            feat_elemento = infra_elemento_viario_p_203[feat_id]
+            feat_deslocamento = infra_via_deslocamento_p.getFeature(feat_id)
+
+            if (feat_elemento["nr_pistas"] != feat_deslocamento["nr_pistas"] or
+                    feat_elemento["nr_faixas"] != feat_deslocamento["nr_faixas"] or
+                    feat_elemento["situacao_fisica"] != feat_deslocamento["situacao_fisica"]):
+                error_feature = QgsFeature(error_layer.fields())
+                error_feature.setGeometry(feat_elemento.geometry())
+                error_feature["ID"] = feat_id
+                error_feature["Classificacao"] = "Erro na Regra 5"
+                error_layer.addFeature(error_feature)
+
+        error_layer.commitChanges()
+        QgsProject.instance().addMapLayer(error_layer)
+        print("Camada de erro 'Erro_Regra_5' criada com sucesso.")
+
+    def tr(self, string):
+        return QgsProcessingAlgorithm.tr(string)
 
     def createInstance(self):
-        return IdentificarMudancas()
-      
-  #nosso código só rodou a caixa de atributos quando usamos essa checkbox, ela está deslocada, mas ainda se refere a caixa inicial
-class AtributosDialog(QDialog):
-    def __init__(self, atributos, parent=None):
-        super(AtributosDialog, self).__init__(parent)
-        self.setWindowTitle('Selecionar Atributos para Ignorar')
-        self.layout = QVBoxLayout(self)
-        self.checkboxes = []
-        
-        for atributo in atributos:
-            checkbox = QCheckBox(atributo)
-            self.layout.addWidget(checkbox)
-            self.checkboxes.append(checkbox)
-        
-        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
-        self.layout.addWidget(self.buttons)
-        
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+        return ValidateAndCorrectFeaturesAlgorithm()
 
-    def get_selected_atributos(self):
-        return [cb.text() for cb in self.checkboxes if cb.isChecked()]
+    def name(self):
+        return 'validate_and_correct_features_algorithm'
 
-#compara os atributos finais 
-def comparar_atributos(feature1, feature2, atributos_comparar):
-    mudancas = []
-    for nome_campo in atributos_comparar:
-        valor1 = feature1[nome_campo]
-        valor2 = feature2[nome_campo]
-        if valor1 != valor2:
-            mudancas.append(nome_campo)
-    return mudancas
+    def displayName(self):
+        return self.tr('Validate and Correct Features Algorithm')
 
-#registrar o algoritmo no QGIS
-def classFactory(iface):
-    from qgis.core import QgsApplication
-    QgsApplication.processingRegistry().addProvider(IdentificarMudancas())
+    def group(self):
+        return self.tr('Projeto 4')
+
+    def groupId(self):
+        return 'projeto4'
+
+    def shortHelpString(self):
+        return self.tr("This algorithm validates and corrects features based on specified rules.")
+
+# Registrar o algoritmo para que seja exibido na interface de processamento do QGIS
+processing.registry().addAlgorithm(ValidateAndCorrectFeaturesAlgorithm())
+
+'''
+Código sem processing separado por regras:
+Regra 1: Verificar os campos "nr_pistas" e "nr_faixas"
+from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsField, QgsWkbTypes
+from PyQt5.QtCore import QVariant
+
+def validate_and_correct_features(line_layer):
+    # Lista para armazenar as feições inválidas
+    invalid_features = []
+
+    nr_pistas_idx = line_layer.fields().indexOf("nr_pistas")
+    nr_faixas_idx = line_layer.fields().indexOf("nr_faixas")
     
+    # Verificar se os campos "nr_pistas" e "nr_faixas" existem
+    if nr_pistas_idx == -1 or nr_faixas_idx == -1:
+        print(f"Os campos 'nr_pistas' ou 'nr_faixas' não foram encontrados na camada '{line_layer.name()}'.")
+        return invalid_features
+    
+    for feature in line_layer.getFeatures():
+        nr_pistas_value = feature["nr_pistas"]
+        nr_faixas_value = feature["nr_faixas"]
 
+        # Converter valores para inteiros se possível
+        try:
+            nr_pistas_value = int(nr_pistas_value)
+        except (TypeError, ValueError):
+            nr_pistas_value = 1  # Valor padrão se a conversão falhar
 
-#codigo anterior
-'''from qgis.PyQt.QtCore import QVariant
-from qgis.PyQt.QtWidgets import QInputDialog, QDialog, QVBoxLayout, QCheckBox, QDialogButtonBox
-from qgis.core import (QgsProject, QgsVectorLayer, QgsField, QgsFeature, 
-                       QgsGeometry, QgsPoint)
+        try:
+            nr_faixas_value = int(nr_faixas_value)
+        except (TypeError, ValueError):
+            nr_faixas_value = 1  # Valor padrão se a conversão falhar
 
-# Função para obter a lista de camadas carregadas no QGIS
-def obter_lista_camadas():
-    return [layer.name() for layer in QgsProject.instance().mapLayers().values()]
+        # Garantir que os valores sejam no mínimo 1
+        if nr_pistas_value < 1:
+            nr_pistas_value = 1
+        if nr_faixas_value < 1:
+            nr_faixas_value = 1
 
-# Função para carregar camada a partir do nome selecionado
-def carregar_camada(nome_camada):
-    camada = QgsProject.instance().mapLayersByName(nome_camada)[0]
-    if not camada.isValid():
-        raise Exception(f"Falha ao carregar a camada {nome_camada}!")
-    return camada
+        # Verificar se nr_pistas é maior que nr_faixas ou se algum dos valores é menor que 1
+        if nr_pistas_value > nr_faixas_value or nr_pistas_value < 1 or nr_faixas_value < 1:
+            invalid_features.append(feature)
 
-# Função para comparar atributos e identificar mudanças
-def comparar_atributos(feature1, feature2, atributos_comparar):
-    mudancas = []
-    for nome_campo in atributos_comparar:
-        valor1 = feature1[nome_campo]
-        valor2 = feature2[nome_campo]
-        if valor1 != valor2:
-            mudancas.append(nome_campo)
-    return mudancas
+    return invalid_features
 
-# Função para criar camada de mudanças
-def criar_camada_mudancas(nome_camada, geom_type):
-    camada = QgsVectorLayer(f"{geom_type}?crs=EPSG:4326", nome_camada, "memory")
-    camada.startEditing()
-    camada.addAttribute(QgsField("id", QVariant.String))
-    camada.addAttribute(QgsField("tipo_mudanca", QVariant.String))
-    camada.addAttribute(QgsField("atributos_modificados", QVariant.String))
-    camada.updateFields()
-    return camada
+def create_point_layer_from_line_layer(line_layer, output_layer_name):
+    # Cria uma nova camada de ponto
+    point_layer = QgsVectorLayer('Point?crs=' + line_layer.crs().authid(), output_layer_name, 'memory')
+    point_layer_data = point_layer.dataProvider()
 
-# Função para identificar mudanças entre duas camadas
-def identificar_mudancas(camada_dia_1, camada_dia_2, nome_camada_mudancas, atributos_comparar, chave_primaria):
-    geom_type = camada_dia_1.geometryType()
-    geom_type_str = {0: "Point", 1: "LineString", 2: "Polygon"}.get(geom_type, "Unknown")
-    camada_mudancas = criar_camada_mudancas(nome_camada_mudancas, geom_type_str)
-    ids_dia_2 = {feature.attribute(chave_primaria): feature for feature in camada_dia_2.getFeatures()}
+    # Copia todos os campos da camada de linha para a camada de ponto
+    point_layer_data.addAttributes(line_layer.fields().toList())
+    point_layer.updateFields()
 
-    for feature_dia_1 in camada_dia_1.getFeatures():
-        id_dia_1 = feature_dia_1.attribute(chave_primaria)
-        geom_dia_1 = feature_dia_1.geometry()
-        
-        feature_proxima = ids_dia_2.get(id_dia_1, None)
+    point_layer.startEditing()
 
-        if feature_proxima:
-            mudancas = comparar_atributos(feature_dia_1, feature_proxima, atributos_comparar)
-            if not geom_dia_1.equals(feature_proxima.geometry()):
-                mudancas.append("geometria")
-            if mudancas:
-                tipo_mudanca = "Modificada"
-                nova_feature = QgsFeature()
-                nova_feature.setGeometry(geom_dia_1)
-                nova_feature.setAttributes([id_dia_1, tipo_mudanca, ", ".join(mudancas)])
-                camada_mudancas.addFeature(nova_feature)
+    # Percorre todos os recursos na camada de linha
+    for feature in line_layer.getFeatures():
+        geometry = feature.geometry()
+        if geometry is None:
+            continue
+
+        # Obtém o ponto na superfície da linha
+        point = geometry.pointOnSurface()
+
+        point_feature = QgsFeature(point_layer.fields())
+        point_feature.setGeometry(point)
+        point_feature.setAttributes(feature.attributes())
+        point_layer.addFeature(point_feature)
+
+    point_layer.commitChanges()
+
+    # Adiciona a nova camada de ponto ao projeto QGIS
+    QgsProject.instance().addMapLayer(point_layer)
+    print(f"Camada de ponto '{output_layer_name}' criada a partir da camada de linha '{line_layer.name()}'.")
+
+def add_and_update_classification(point_layer):
+    point_layer.startEditing()
+
+    # Adicionar o campo "Classificacao" se não existir
+    if "Classificacao" not in [field.name() for field in point_layer.fields()]:
+        new_field = QgsField("Classificacao", QVariant.String)
+        point_layer.dataProvider().addAttributes([new_field])
+        point_layer.updateFields()
+
+    classificacao_idx = point_layer.fields().indexOf("Classificacao")
+    situacao_fisica_idx = point_layer.fields().indexOf("situacao_fisica")
+    material_construcao_idx = point_layer.fields().indexOf("material_construcao")
+    tipo_idx = point_layer.fields().indexOf("tipo")
+    nr_pistas_idx = point_layer.fields().indexOf("nr_pistas")
+    nr_faixas_idx = point_layer.fields().indexOf("nr_faixas")
+
+    # Verificar se os campos necessários existem
+    if situacao_fisica_idx == -1 or material_construcao_idx == -1 or tipo_idx == -1 or nr_pistas_idx == -1 or nr_faixas_idx == -1:
+        print(f"Um dos campos necessários ('situacao_fisica', 'material_construcao', 'tipo', 'nr_pistas', 'nr_faixas') não foi encontrado na camada '{point_layer.name()}'.")
+        point_layer.commitChanges()
+        return
+
+    # Percorre todos os recursos na camada de ponto
+    for feature in point_layer.getFeatures():
+        # Obter os valores dos atributos
+        situacao_fisica_value = feature.attribute(situacao_fisica_idx)
+        material_construcao_value = feature.attribute(material_construcao_idx)
+        tipo_value = feature.attribute(tipo_idx)
+        nr_pistas_value = feature.attribute(nr_pistas_idx)
+        nr_faixas_value = feature.attribute(nr_faixas_idx)
+
+        # Definir a classificação inicial baseada em "situacao_fisica"
+        if situacao_fisica_value == 3:
+            classificacao_value = "Correto"
+        elif situacao_fisica_value == 1:
+            classificacao_value = "Erro Abandono"
         else:
-            tipo_mudanca = "Removida"
-            nova_feature = QgsFeature()
-            nova_feature.setGeometry(geom_dia_1)
-            nova_feature.setAttributes([id_dia_1, tipo_mudanca, ""])
-            camada_mudancas.addFeature(nova_feature)
+            classificacao_value = ""
 
-    ids_dia_1 = {feature.attribute(chave_primaria) for feature in camada_dia_1.getFeatures()}
+        # Atualizar a classificação baseada em "material_construcao" e "tipo"
+        if tipo_value == 401 and material_construcao_value == 3:
+            classificacao_value = "Erro Material"
 
-    for feature_dia_2 in camada_dia_2.getFeatures():
-        id_dia_2 = feature_dia_2.attribute(chave_primaria)
-        geom_dia_2 = feature_dia_2.geometry()
+        # Verificar e atualizar a classificação com base em "nr_pistas" e "nr_faixas"
+        try:
+            nr_pistas_value = int(nr_pistas_value)
+            nr_faixas_value = int(nr_faixas_value)
+        except (TypeError, ValueError):
+            nr_pistas_value = 1
+            nr_faixas_value = 1
 
-        if id_dia_2 not in ids_dia_1:
-            tipo_mudanca = "Adicionada"
-            nova_feature = QgsFeature()
-            nova_feature.setGeometry(geom_dia_2)
-            nova_feature.setAttributes([id_dia_2, tipo_mudanca, ""])
-            camada_mudancas.addFeature(nova_feature)
+        if nr_pistas_value > nr_faixas_value or nr_pistas_value < 1 or nr_faixas_value < 1:
+            classificacao_value = "Erro Material"
 
-    # Remover feições com 'nao_modificado'
-    camada_mudancas.startEditing()
-    for feature in camada_mudancas.getFeatures():
-        if feature['atributos_modificados'] == "nao_modificado":
-            camada_mudancas.deleteFeature(feature.id())
-    camada_mudancas.commitChanges()
+        # Definir o valor do atributo "Classificacao"
+        feature.setAttribute(classificacao_idx, classificacao_value)
+        point_layer.updateFeature(feature)
 
-    QgsProject.instance().addMapLayer(camada_mudancas)
-    print(f"Camada de mudanças {nome_camada_mudancas} adicionada ao projeto!")
+    point_layer.commitChanges()
+    print(f"Campo 'Classificacao' adicionado e atualizado na camada '{point_layer.name()}'.")
 
-# Diálogo personalizado para selecionar múltiplos atributos
-class AtributosDialog(QDialog):
-    def __init__(self, atributos, parent=None):
-        super(AtributosDialog, self).__init__(parent)
-        self.setWindowTitle('Selecionar Atributos para Ignorar')
-        self.layout = QVBoxLayout(self)
-        self.checkboxes = []
-        
-        for atributo in atributos:
-            checkbox = QCheckBox(atributo)
-            self.layout.addWidget(checkbox)
-            self.checkboxes.append(checkbox)
-        
-        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
-        self.layout.addWidget(self.buttons)
-        
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+# Obtenha as camadas de linha especificadas e crie camadas de ponto
+line_layers = {
+    "dados_projeto4_2024 — infra_via_deslocamento_l": "infra_via_deslocamento_p",
+    "dados_projeto4_2024 — elemnat_trecho_drenagem_l": "elemnat_trecho_drenagem_p"
+}
 
-    def get_selected_atributos(self):
-        return [cb.text() for cb in self.checkboxes if cb.isChecked()]
-
-# Função para solicitar entrada do usuário
-def solicitar_entrada():
-    lista_camadas = obter_lista_camadas()
-    
-    nome_camada_pontos, _ = QInputDialog.getItem(None, "Entrada de Dados", "Nome da camada de pontos:", lista_camadas, 0, False)
-    nome_camada_dia_1, _ = QInputDialog.getItem(None, "Entrada de Dados", "Nome da camada do dia 1:", lista_camadas, 0, False)
-    
-    # Carregar a camada do dia 1 antes de solicitar atributos
-    camada_dia_1 = carregar_camada(nome_camada_dia_1)
-    atributos_disponiveis = [field.name() for field in camada_dia_1.fields()]
-    
-    nome_camada_dia_2, _ = QInputDialog.getItem(None, "Entrada de Dados", "Nome da camada do dia 2:", lista_camadas, 0, False)
-    distancia_tolerancia, _ = QInputDialog.getDouble(None, "Entrada de Dados", "Distância de tolerância (metros):", decimals=2)
-    chave_primaria, _ = QInputDialog.getItem(None, "Entrada de Dados", "Atributo correspondente à chave primária:", atributos_disponiveis, 0, False)
-
-    # Diálogo personalizado para selecionar múltiplos atributos
-    dialog = AtributosDialog(atributos_disponiveis)
-    if dialog.exec_() == QDialog.Accepted:
-        atributos_ignorados = dialog.get_selected_atributos()
+for line_layer_name, point_layer_name in line_layers.items():
+    line_layer = QgsProject.instance().mapLayersByName(line_layer_name)
+    if line_layer:
+        create_point_layer_from_line_layer(line_layer[0], point_layer_name)
     else:
-        atributos_ignorados = []
-    
-    return nome_camada_pontos, nome_camada_dia_1, nome_camada_dia_2, distancia_tolerancia, chave_primaria, atributos_ignorados
+        print(f"Camada de linha '{line_layer_name}' não encontrada.")
 
-# Solicitar entrada do usuário
-(nome_camada_pontos, nome_camada_dia_1, nome_camada_dia_2, distancia_tolerancia, chave_primaria, atributos_ignorados) = solicitar_entrada()
+# Adicionar e atualizar o campo "Classificacao" nas camadas de ponto especificadas
+point_layers_to_verify = ["infra_via_deslocamento_p", "dados_projeto4_2024 — infra_elemento_viario_p"]
 
-# Carregar as camadas a partir das seleções do usuário
-camada_pontos = carregar_camada(nome_camada_pontos)
-camada_dia_1 = carregar_camada(nome_camada_dia_1)
-camada_dia_2 = carregar_camada(nome_camada_dia_2)
+for point_layer_name in point_layers_to_verify:
+    point_layer = QgsProject.instance().mapLayersByName(point_layer_name)
+    if point_layer:
+        add_and_update_classification(point_layer[0])
+    else:
+        print(f"Camada de ponto '{point_layer_name}' não encontrada.")
 
-# Filtrar os atributos a serem comparados
-atributos_comparar = [field.name() for field in camada_dia_1.fields() if field.name() not in atributos_ignorados]
+Regra 2: Verificar se os pontos da camada infra_elemento_viario_p com tipo = 203 estão presentes na camada infra_via_deslocamento_p
 
-# Identificar mudanças e criar a camada de mudanças
-identificar_mudancas(camada_dia_1, camada_dia_2, "mudancas_detectadas", atributos_comparar, chave_primaria)
+Regra 3: Verificar se os pontos da camada infra_elemento_viario_p com tipo = 203 estão presentes na camada infra_via_deslocamento_p
+from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsField, QgsWkbTypes, NULL
+from PyQt5.QtCore import QVariant
 
-# Criar a camada de linha baseada na camada de pontos "tracker"
-nome_camada_trajeto_gps = "trajetoria_do_gps"
+def create_point_layer_from_line_layer(line_layer, output_layer_name):
+    # Cria uma nova camada de ponto
+    point_layer = QgsVectorLayer('Point?crs=' + line_layer.crs().authid(), output_layer_name, 'memory')
+    point_layer_data = point_layer.dataProvider()
 
-# Criar uma nova camada de linha
-camada_trajeto_gps = QgsVectorLayer("LineString?crs=EPSG:4326", nome_camada_trajeto_gps, "memory")
-camada_trajeto_gps.startEditing()
+    # Copia todos os campos da camada de linha para a camada de ponto
+    point_layer_data.addAttributes(line_layer.fields().toList())
+    point_layer.updateFields()
 
-# Adicionar um campo para o ID do ponto
-field_id = QgsField(chave_primaria, QVariant.String)
-camada_trajeto_gps.addAttribute(field_id)
-camada_trajeto_gps.updateFields()
+    point_layer.startEditing()
 
-# Obter os pontos da camada "tracker"
-pontos_tracker = []
-atributos_tracker = []
+    # Percorre todos os recursos na camada de linha
+    for feature in line_layer.getFeatures():
+        geometry = feature.geometry()
+        if geometry is None:
+            continue
 
-# Coletar os pontos e seus atributos
-for feature in camada_pontos.getFeatures():
-    ponto = feature.geometry().asPoint()
-    creation_time = feature.attribute("creation_time")
-    id_ponto = feature.attribute(chave_primaria)
-    pontos_tracker.append((ponto, creation_time, id_ponto))
-    atributos_tracker.append(id_ponto)
+        # Obtém o ponto na superfície da linha
+        point = geometry.pointOnSurface()
 
-# Ordenar os pontos com base no creation_time
-pontos_tracker.sort(key=lambda x: x[1])
+        point_feature = QgsFeature(point_layer.fields())
+        point_feature.setGeometry(point)
+        point_feature.setAttributes(feature.attributes())
+        point_layer.addFeature(point_feature)
 
-# Adicionar linhas entre pontos em ordem crescente de creation_time
-for i in range(len(pontos_tracker) - 1):
-    ponto_atual, _, id_ponto_atual = pontos_tracker[i]
-    prox_ponto, _, id_prox_ponto = pontos_tracker[i + 1]
-    
-    ponto_atual_qgs = QgsPoint(ponto_atual.x(), ponto_atual.y())
-    prox_ponto_qgs = QgsPoint(prox_ponto.x(), prox_ponto.y())
-    
-    linha_trajeto = QgsGeometry.fromPolyline([ponto_atual_qgs, prox_ponto_qgs])
-    
-    feature_trajeto = QgsFeature()
-    feature_trajeto.setGeometry(linha_trajeto)
-    feature_trajeto.setAttributes([id_ponto_atual])
-    
-    camada_trajeto_gps.addFeature(feature_trajeto)
+    point_layer.commitChanges()
 
-camada_trajeto_gps.commitChanges()
+    # Adiciona a nova camada de ponto ao projeto QGIS
+    QgsProject.instance().addMapLayer(point_layer)
+    print(f"Camada de ponto '{output_layer_name}' criada a partir da camada de linha '{line_layer.name()}'.")
 
-# Adicionar a nova camada de linha ao projeto
-QgsProject.instance().addMapLayer(camada_trajeto_gps)
-print("Nova camada de linha adicionada ao projeto!")
+# Função para verificar e classificar pontos
+def verify_and_classify_points():
+    # Obter as camadas de ponto
+    layers = {
+        "infra_elemento_viario_p": QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_elemento_viario_p")[0],
+        "infra_via_deslocamento_p": QgsProject.instance().mapLayersByName("infra_via_deslocamento_p")[0],
+        "elemnat_trecho_drenagem_p": QgsProject.instance().mapLayersByName("elemnat_trecho_drenagem_p")[0]
+    }
 
-# Comparar a camada trajeto_gps com a camada mudancas_detectadas e criar camada mudancas_final
-def comparar_camadas_final(camada1, camada2, chave_primaria, nome_camada_final, tolerancia):
-    geom_type = camada1.geometryType()
-    geom_type_str = {0: "Point", 1: "LineString", 2: "Polygon"}.get(geom_type, "Unknown")
-    camada_final = criar_camada_mudancas(nome_camada_final, geom_type_str)
-    
-    ids_camada2 = {feature.attribute(chave_primaria): feature for feature in camada2.getFeatures()}
-    ids_camada1 = {feature.attribute(chave_primaria): feature for feature in camada1.getFeatures()}
+    # Coletar IDs de pontos em cada camada
+    ids_in_layers = {name: set(feature.id() for feature in layer.getFeatures()) for name, layer in layers.items()}
 
-    # Buffer ao redor da camada trajeto_gps
-    for feature_camada1 in camada1.getFeatures():
-        buffer_geom = feature_camada1.geometry().buffer(tolerancia, 5)
-        id_camada1 = feature_camada1.attribute(chave_primaria)
-        
-        # Identificar adições e modificações
-        for id_camada2, feature_camada2 in ids_camada2.items():
-            if buffer_geom.intersects(feature_camada2.geometry()):
-                if id_camada2 not in ids_camada1:
-                    tipo_mudanca = "Adicionada"
-                    nova_feature = QgsFeature()
-                    nova_feature.setGeometry(feature_camada2.geometry())
-                    nova_feature.setAttributes([id_camada2, tipo_mudanca, ""])
-                    camada_final.addFeature(nova_feature)
-                else:
-                    mudancas = comparar_atributos(feature_camada1, feature_camada2, [chave_primaria])
-                    if not feature_camada1.geometry().equals(feature_camada2.geometry()):
-                        mudancas.append("geometria")
-                    if mudancas:
-                        tipo_mudanca = "Modificada"
-                        nova_feature = QgsFeature()
-                        nova_feature.setGeometry(feature_camada1.geometry())
-                        nova_feature.setAttributes([id_camada1, tipo_mudanca, ", ".join(mudancas)])
-                        camada_final.addFeature(nova_feature)
+    # Identificar pontos comuns às três camadas
+    common_ids = ids_in_layers["infra_elemento_viario_p"] & ids_in_layers["infra_via_deslocamento_p"] & ids_in_layers["elemnat_trecho_drenagem_p"]
 
-    # Identificar remoções
-    for id_camada1, feature_camada1 in ids_camada1.items():
-        if id_camada1 not in ids_camada2:
-            tipo_mudanca = "Removida"
-            nova_feature = QgsFeature()
-            nova_feature.setGeometry(feature_camada1.geometry())
-            nova_feature.setAttributes([id_camada1, tipo_mudanca, ""])
-            camada_final.addFeature(nova_feature)
+    # Criar uma nova camada de pontos para erros
+    error_layer = QgsVectorLayer('Point?crs=' + layers["infra_elemento_viario_p"].crs().authid(), "Erro_Regra_3", "memory")
+    error_layer_data = error_layer.dataProvider()
+    error_layer_data.addAttributes([QgsField("ID", QVariant.Int), QgsField("Classificacao", QVariant.String)])
+    error_layer.updateFields()
 
-    camada_final.commitChanges()
-    QgsProject.instance().addMapLayer(camada_final)
-    print(f"Camada de mudanças {nome_camada_final} adicionada ao projeto!")
+    error_layer.startEditing()
 
-# Comparar as camadas trajeto_gps e mudancas_detectadas e criar camada mudancas_final
-trajetoria_gps = QgsProject.instance().mapLayersByName(nome_camada_trajeto_gps)[0]
-mudancas_detectadas = QgsProject.instance().mapLayersByName("mudancas_detectadas")[0]
-comparar_camadas_final(trajetoria_gps, mudancas_detectadas, chave_primaria, "mudancas_final", distancia_tolerancia)'''
+    # Verificar os pontos comuns e classificar
+    for feature in layers["infra_elemento_viario_p"].getFeatures():
+        if feature.id() in common_ids:
+            tipo_value = feature["tipo"]
+            if tipo_value not in {501, 203, 401}:
+                error_feature = QgsFeature(error_layer.fields())
+                error_feature.setGeometry(feature.geometry())
+                error_feature["ID"] = feature.id()
+                error_feature["Classificacao"] = "Erro Regra 3"
+                error_layer.addFeature(error_feature)
+
+    error_layer.commitChanges()
+
+    # Adicionar a nova camada de erro ao projeto QGIS
+    QgsProject.instance().addMapLayer(error_layer)
+    print("Camada de erro 'Erro_Regra_3' criada com sucesso.")
+
+# Obtenha as camadas de linha especificadas e crie camadas de ponto com o mesmo nome
+line_layers = {
+    "dados_projeto4_2024 — infra_via_deslocamento_l": "infra_via_deslocamento_p",
+    "dados_projeto4_2024 — elemnat_trecho_drenagem_l": "elemnat_trecho_drenagem_p"
+}
+
+for line_layer_name, point_layer_name in line_layers.items():
+    line_layer = QgsProject.instance().mapLayersByName(line_layer_name)
+    if line_layer:
+        create_point_layer_from_line_layer(line_layer[0], point_layer_name)
+    else:
+        print(f"Camada de linha '{line_layer_name}' não encontrada.")
+
+# Verificar e classificar pontos
+verify_and_classify_points()
+
+Regra 4:
+from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsField, QgsWkbTypes, NULL
+from PyQt5.QtCore import QVariant
+
+def create_point_layer_from_line_layer(line_layer, output_layer_name):
+    # Cria uma nova camada de ponto
+    point_layer = QgsVectorLayer('Point?crs=' + line_layer.crs().authid(), output_layer_name, 'memory')
+    point_layer_data = point_layer.dataProvider()
+
+    # Copia todos os campos da camada de linha para a camada de ponto
+    point_layer_data.addAttributes(line_layer.fields().toList())
+    point_layer.updateFields()
+
+    point_layer.startEditing()
+
+    # Percorre todos os recursos na camada de linha
+    for feature in line_layer.getFeatures():
+        geometry = feature.geometry()
+        if geometry is None:
+            continue
+
+        # Obtém o ponto na superfície da linha
+        point = geometry.pointOnSurface()
+
+        point_feature = QgsFeature(point_layer.fields())
+        point_feature.setGeometry(point)
+        point_feature.setAttributes(feature.attributes())
+        point_layer.addFeature(point_feature)
+
+    point_layer.commitChanges()
+
+    # Adiciona a nova camada de ponto ao projeto QGIS
+    QgsProject.instance().addMapLayer(point_layer)
+    print(f"Camada de ponto '{output_layer_name}' criada a partir da camada de linha '{line_layer.name()}'.")
+
+def check_and_plot_errors():
+    # Obter as camadas de ponto
+    infra_elemento_viario_p = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_elemento_viario_p")[0]
+    infra_via_deslocamento_p = QgsProject.instance().mapLayersByName("infra_via_deslocamento_p")[0]
+    elemnat_trecho_drenagem_p = QgsProject.instance().mapLayersByName("elemnat_trecho_drenagem_p")[0]
+
+    # Coletar IDs de pontos em cada camada
+    infra_elemento_viario_ids = set(feature.id() for feature in infra_elemento_viario_p.getFeatures())
+    infra_via_deslocamento_ids = set(feature.id() for feature in infra_via_deslocamento_p.getFeatures())
+    elemnat_trecho_drenagem_ids = set(feature.id() for feature in elemnat_trecho_drenagem_p.getFeatures())
+
+    # Criar uma nova camada de pontos para erros
+    error_layer = QgsVectorLayer('Point?crs=' + infra_elemento_viario_p.crs().authid(), "Erro_Regra_4", "memory")
+    error_layer_data = error_layer.dataProvider()
+    error_layer_data.addAttributes([QgsField("ID", QVariant.Int), QgsField("Classificacao", QVariant.String)])
+    error_layer.updateFields()
+
+    error_layer.startEditing()
+
+    # Verificar os pontos e aplicar regras
+    for feature in infra_elemento_viario_p.getFeatures():
+        tipo_value = feature["tipo"]
+        if tipo_value in {501, 203, 401}:
+            if feature.id() in infra_via_deslocamento_ids:
+                infra_via_deslocamento_feature = infra_via_deslocamento_p.getFeature(feature.id())
+                if infra_via_deslocamento_feature["tipo"] == 2:
+                    if feature.id() not in elemnat_trecho_drenagem_ids:
+                        error_feature = QgsFeature(error_layer.fields())
+                        error_feature.setGeometry(feature.geometry())
+                        error_feature["ID"] = feature.id()
+                        error_feature["Classificacao"] = "Erro da Regra 4"
+                        error_layer.addFeature(error_feature)
+
+    error_layer.commitChanges()
+
+    # Adicionar a nova camada de erro ao projeto QGIS
+    QgsProject.instance().addMapLayer(error_layer)
+    print("Camada de erro 'Erro_Regra_4' criada com sucesso.")
+
+# Obtenha as camadas de linha especificadas e crie camadas de ponto com o mesmo nome
+line_layers = {
+    "dados_projeto4_2024 — infra_via_deslocamento_l": "infra_via_deslocamento_p",
+    "dados_projeto4_2024 — elemnat_trecho_drenagem_l": "elemnat_trecho_drenagem_p"
+}
+
+for line_layer_name, point_layer_name in line_layers.items():
+    line_layer = QgsProject.instance().mapLayersByName(line_layer_name)
+    if line_layer:
+        create_point_layer_from_line_layer(line_layer[0], point_layer_name)
+    else:
+        print(f"Camada de linha '{line_layer_name}' não encontrada.")
+
+# Verificar e plotar erros
+check_and_plot_errors()
+
+Regra 5:
+from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsField, QgsWkbTypes, NULL
+from PyQt5.QtCore import QVariant
+
+def create_point_layer_from_line_layer(line_layer, output_layer_name):
+    # Cria uma nova camada de ponto
+    point_layer = QgsVectorLayer('Point?crs=' + line_layer.crs().authid(), output_layer_name, 'memory')
+    point_layer_data = point_layer.dataProvider()
+
+    # Copia todos os campos da camada de linha para a camada de ponto
+    point_layer_data.addAttributes(line_layer.fields().toList())
+    point_layer.updateFields()
+
+    point_layer.startEditing()
+
+    # Percorre todos os recursos na camada de linha
+    for feature in line_layer.getFeatures():
+        geometry = feature.geometry()
+        if geometry is None:
+            continue
+
+        # Obtém os vértices da linha
+        for vertex in geometry.vertices():
+            point_feature = QgsFeature(point_layer.fields())
+            point_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(vertex.x(), vertex.y())))
+            point_feature.setAttributes(feature.attributes())
+            point_layer.addFeature(point_feature)
+
+    point_layer.commitChanges()
+
+    # Adiciona a nova camada de ponto ao projeto QGIS
+    QgsProject.instance().addMapLayer(point_layer)
+    print(f"Camada de ponto '{output_layer_name}' criada a partir da camada de linha '{line_layer.name()}'.")
+
+def validate_points():
+    # Obter as camadas
+    infra_elemento_viario_p = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_elemento_viario_p")[0]
+    infra_via_deslocamento_p = QgsProject.instance().mapLayersByName("infra_via_deslocamento_p")[0]
+
+    # Filtrar pontos da camada infra_elemento_viario_p com tipo = 203
+    infra_elemento_viario_p_203 = {feat.id(): feat for feat in infra_elemento_viario_p.getFeatures() if feat["tipo"] == 203}
+
+    # Verificar pontos que satisfazem a regra 3
+    common_ids = set(infra_elemento_viario_p_203.keys()) & {feat.id() for feat in infra_via_deslocamento_p.getFeatures()}
+
+    # Verificar pontos que satisfazem a regra 4
+    via_deslocamento_layer = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_via_deslocamento_l")[0]
+    vertices_via_deslocamento = {QgsPointXY(vertex.x(), vertex.y()) for feature in via_deslocamento_layer.getFeatures() for vertex in feature.geometry().vertices()}
+
+    valid_points = {feat_id for feat_id in common_ids if QgsPointXY(infra_elemento_viario_p_203[feat_id].geometry().asPoint()) in vertices_via_deslocamento}
+
+    # Verificar atributos nr_pistas, nr_faixas e situacao_fisica
+    error_layer = QgsVectorLayer("Point?crs=" + infra_via_deslocamento_p.crs().authid(), "Erro_Regra_5", "memory")
+    error_provider = error_layer.dataProvider()
+
+    error_provider.addAttributes([QgsField("ID", QVariant.Int), QgsField("Classificacao", QVariant.String)])
+    error_layer.updateFields()
+
+    error_layer.startEditing()
+
+    for feat_id in valid_points:
+        feat_elemento = infra_elemento_viario_p_203[feat_id]
+        feat_deslocamento = infra_via_deslocamento_p.getFeature(feat_id)
+
+        if (feat_elemento["nr_pistas"] != feat_deslocamento["nr_pistas"] or
+                feat_elemento["nr_faixas"] != feat_deslocamento["nr_faixas"] or
+                feat_elemento["situacao_fisica"] != feat_deslocamento["situacao_fisica"]):
+            error_feature = QgsFeature(error_layer.fields())
+            error_feature.setGeometry(feat_elemento.geometry())
+            error_feature["ID"] = feat_id
+            error_feature["Classificacao"] = "Erro na Regra 5"
+            error_layer.addFeature(error_feature)
+
+    error_layer.commitChanges()
+    QgsProject.instance().addMapLayer(error_layer)
+    print("Camada de erro 'Erro_Regra_5' criada com sucesso.")
+
+# Transformar a camada de linha em uma camada de pontos
+line_layer_name = "dados_projeto4_2024 — infra_via_deslocamento_l"
+point_layer_name = "infra_via_deslocamento_p"
+
+line_layer = QgsProject.instance().mapLayersByName(line_layer_name)
+if line_layer:
+    create_point_layer_from_line_layer(line_layer[0], point_layer_name)
+else:
+    print(f"Camada de linha '{line_layer_name}' não encontrada.")
+
+# Validar os pontos e plotar erros
+validate_points()
+
+'''

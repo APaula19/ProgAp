@@ -35,7 +35,8 @@ from qgis.core import QgsProcessingProvider
 from .algorithms.Projeto1.solucao import TrafegabilidadeAlgorithm
 from .algorithms.Projeto2.solucao import CriarCamadasCurvasNivelMod
 from .algorithms.Projeto3.solucao import IdentificarMudancas
-from .algorithms.Projeto4.solucao import IdentificarMudancas2
+from .algorithms.Projeto4.solucao import ValidateAndCorrectFeaturesAlgorithm
+from .algorithms.Projeto4.solucao_complementar import ValidateAndCreatePointsAlgorithm1
 
 
 class ProgramacaoAplicadaGrupo3Provider(QgsProcessingProvider):
@@ -61,7 +62,8 @@ class ProgramacaoAplicadaGrupo3Provider(QgsProcessingProvider):
         self.addAlgorithm(TrafegabilidadeAlgorithm())
         self.addAlgorithm(CriarCamadasCurvasNivelMod())
         self.addAlgorithm(IdentificarMudancas())
-        self.addAlgorithm(IdentificarMudancas2())
+        self.addAlgorithm(ValidateAndCorrectFeaturesAlgorithm())
+        self.addAlgorithm(ValidateAndCreatePointsAlgorithm1())
 
     def id(self):
         """
