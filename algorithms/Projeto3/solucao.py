@@ -161,10 +161,10 @@ class IdentificarMudancas(QgsProcessingAlgorithm):
         return 'Identificar Mudanças'
 
     def group(self):
-        return 'Exemplo de Algoritmo'
+        return 'Projeto 3'
 
     def groupId(self):
-        return 'exemplo_algoritmo'
+        return 'Projeto3'
 
     def createInstance(self):
         return IdentificarMudancas()
