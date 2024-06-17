@@ -201,6 +201,7 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
 
     def groupId(self):
         return 'projeto4'
+    
 
     def shortHelpString(self):
         return self.tr("This algorithm validates and corrects features based on specified rules.")
@@ -348,7 +349,7 @@ def add_and_update_classification(point_layer):
 # Obtenha as camadas de linha especificadas e crie camadas de ponto
 line_layers = {
     "dados_projeto4_2024 — infra_via_deslocamento_l": "infra_via_deslocamento_p",
-    "dados_projeto4_2024 — elemnat_trecho_drenagem_l": "elemnat_trecho_drenagem_p"
+    "024 — elemnat_trecho_drenagem_ldados_projeto4_2": "elemnat_trecho_drenagem_p"
 }
 
 for line_layer_name, point_layer_name in line_layers.items():
@@ -369,6 +370,126 @@ for point_layer_name in point_layers_to_verify:
         print(f"Camada de ponto '{point_layer_name}' não encontrada.")
 
 Regra 2: Verificar se os pontos da camada infra_elemento_viario_p com tipo = 203 estão presentes na camada infra_via_deslocamento_p
+
+from qgis.PyQt.QtCore import QVariant
+from qgis.core import (QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource, 
+                       QgsProcessingParameterFeatureSink, QgsFeature, QgsFields, QgsField,
+                       QgsWkbTypes, QgsProcessing, QgsProject, QgsGeometry, QgsPointXY)
+import processing
+
+class ValidacaoElementosVarios(QgsProcessingAlgorithm):
+    DRENAGEM = 'DRENAGEM'
+    VIA_DESLOCAMENTO = 'VIA_DESLOCAMENTO'
+    OUTPUT = 'OUTPUT'
+
+    def initAlgorithm(self, config=None):
+        self.addParameter(
+            QgsProcessingParameterFeatureSource(
+                self.DRENAGEM,
+                'Trecho de Drenagem',
+                [QgsProcessing.TypeVectorLine]
+            )
+        )
+        
+        self.addParameter(
+            QgsProcessingParameterFeatureSource(
+                self.VIA_DESLOCAMENTO,
+                'Via de Deslocamento',
+                [QgsProcessing.TypeVectorLine]
+            )
+        )
+        
+        self.addParameter(
+            QgsProcessingParameterFeatureSink(
+                self.OUTPUT,
+                'Erros de Validação',
+                QgsProcessing.TypeVectorPoint
+            )
+        )
+
+    def processAlgorithm(self, parameters, context, feedback):
+        # Carregar camadas de entrada
+        trecho_drenagem_layer = self.parameterAsSource(parameters, self.DRENAGEM, context)
+        via_deslocamento_layer = self.parameterAsSource(parameters, self.VIA_DESLOCAMENTO, context)
+
+        if not trecho_drenagem_layer or not via_deslocamento_layer:
+            raise QgsProcessingException("Não foi possível carregar uma das camadas de entrada.")
+
+        # Configurar a camada de saída
+        fields = QgsFields()
+        fields.append(QgsField('erro', QVariant.String))
+
+        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT, context,
+                                               fields, QgsWkbTypes.Point, trecho_drenagem_layer.sourceCrs())
+
+        # Executar a função de interseção de linhas
+        params = {
+            'INPUT': parameters[self.DRENAGEM],
+            'INTERSECT': parameters[self.VIA_DESLOCAMENTO],
+            'INPUT_FIELDS': [],
+            'INTERSECT_FIELDS': [],
+            'INTERSECT_FIELDS_PREFIX': '',
+            'OUTPUT': 'memory:'
+        }
+
+        intersection_result = processing.run("native:lineintersections", params, context=context, feedback=feedback)
+        intersection_layer = intersection_result['OUTPUT']
+
+        # Analisar as interseções para encontrar erros
+        feature_map = {}
+        for feature in intersection_layer.getFeatures():
+            point = feature.geometry().asPoint()
+            key = (point.x(), point.y())
+            if key in feature_map:
+                feature_map[key].append(feature)
+            else:
+                feature_map[key] = [feature]
+        
+        # Adicionar erros de validação à camada de saída
+        for key, features in feature_map.items():
+            if len(features) > 1:
+                for feature in features:
+                    error_feature = QgsFeature(fields)
+                    error_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(key[0], key[1])))
+                    error_feature.setAttributes(["Interseção múltipla"])
+                    sink.addFeature(error_feature, QgsFeatureSink.FastInsert)
+
+        return {self.OUTPUT: dest_id}
+
+    def name(self):
+        return "validacao_elementos_varios"
+
+    def displayName(self):
+        return "Validação de Elementos Viários"
+
+    def group(self):
+        return "Meu Grupo de Processamentos"
+
+    def groupId(self):
+        return "meu_grupo_de_processamentos"
+
+    def createInstance(self):
+        return ValidacaoElementosVarios()
+
+# Registra o algoritmo na interface de processamento do QGIS
+if __name__ == '__main__':
+    from qgis import processing
+    from qgis.core import QgsApplication
+    QgsApplication.setPrefixPath(r'C:\PROGRA~1/QGIS33~1.0/apps/qgis', True)
+    QgsApplication.initQgis()
+    QgsApplication.processingRegistry().addAlgorithm(ValidacaoElementosVarios())
+
+    # Executar o script
+    params = {
+        'DRENAGEM': 'caminho_para_sua_camada_de_drenagem',
+        'VIA_DESLOCAMENTO': 'caminho_para_sua_camada_de_via_deslocamento',
+        'OUTPUT': 'memory:'
+    }
+
+    processing.run("validacao_elementos_varios", params)
+
+    QgsApplication.exitQgis()
+
 
 Regra 3: Verificar se os pontos da camada infra_elemento_viario_p com tipo = 203 estão presentes na camada infra_via_deslocamento_p
 from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsField, QgsWkbTypes, NULL
