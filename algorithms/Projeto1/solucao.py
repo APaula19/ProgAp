@@ -39,9 +39,9 @@ class TrafegabilidadeAlgorithm(QgsProcessingAlgorithm):
     def displayName(self):
         return self.tr('Carta de Trafegabilidade')
     def group(self):
-        return self.tr('Exemplos')
+        return self.tr('Projeto 1')
     def groupId(self):
-        return 'exemplos'
+        return 'Projeto1'
     def initAlgorithm(self, config=None):
         #Parâmetros já fornecidos
         self.addParameter(QgsProcessingParameterFeatureSource(self.VIA_DESLOCAMENTO,
