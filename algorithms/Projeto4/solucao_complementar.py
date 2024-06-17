@@ -15,7 +15,7 @@ from qgis.core import (
     QgsProject,
 )
 from PyQt5.QtCore import QVariant
-import processing
+from qgis import processing
 class ValidateAndCreatePointsAlgorithm1(QgsProcessingAlgorithm):
 
     INPUT_MASSA_DAGUA_LAYER = 'INPUT_MASSA_DAGUA_LAYER'
