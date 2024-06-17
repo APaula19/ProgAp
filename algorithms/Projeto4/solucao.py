@@ -44,22 +44,22 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
         )
 
     def processAlgorithm(self, parameters, context, feedback):
-        # Obter os parâmetros
+        #Obter os parâmetros
         input_line_layer = self.parameterAsVectorLayer(parameters, self.INPUT_LINE_LAYER, context)
         output_point_layer = self.parameterAsSink(parameters, self.OUTPUT_POINT_LAYER, context, input_line_layer.fields(), QgsWkbTypes.Point, input_line_layer.crs())
         classify_features = self.parameterAsBool(parameters, self.CLASSIFY_FEATURES, context)
 
-        # Lista para armazenar as feições inválidas
+        #Lista para armazenar as feições inválidas
         invalid_features = []
 
         nr_pistas_idx = input_line_layer.fields().indexOf("nr_pistas")
         nr_faixas_idx = input_line_layer.fields().indexOf("nr_faixas")
 
-        # Verificar se os campos "nr_pistas" e "nr_faixas" existem
+        #Verificar se os campos "nr_pistas" e "nr_faixas" existem
         if nr_pistas_idx == -1 or nr_faixas_idx == -1:
             raise QgsProcessingException(f"Os campos 'nr_pistas' ou 'nr_faixas' não foram encontrados na camada '{input_line_layer.name()}'.")
         
-        # Verificar e corrigir feições inválidas
+        #Verificar e corrigir feições inválidas
         total_count = input_line_layer.featureCount()
         step = 10  # Processar em lotes de 10 feições
         current_count = 0
@@ -68,7 +68,7 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
             nr_pistas_value = feature["nr_pistas"]
             nr_faixas_value = feature["nr_faixas"]
 
-            # Converter valores para inteiros se possível
+            #Converter valores para inteiros se possível
             try:
                 nr_pistas_value = int(nr_pistas_value)
             except (TypeError, ValueError):
@@ -79,17 +79,17 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
             except (TypeError, ValueError):
                 nr_faixas_value = 1  # Valor padrão se a conversão falhar
 
-            # Garantir que os valores sejam no mínimo 1
+            #Garantir que os valores sejam no mínimo 1
             if nr_pistas_value < 1:
                 nr_pistas_value = 1
             if nr_faixas_value < 1:
                 nr_faixas_value = 1
 
-            # Verificar se nr_pistas é maior que nr_faixas ou se algum dos valores é menor que 1
+            #Verificar se nr_pistas é maior que nr_faixas ou se algum dos valores é menor que 1
             if nr_pistas_value > nr_faixas_value or nr_pistas_value < 1 or nr_faixas_value < 1:
                 invalid_features.append(feature)
 
-            # Criar feições na camada de ponto se necessário
+            #Criar feições na camada de ponto se necessário
             if classify_features:
                 point_feature = QgsFeature()
                 point_geometry = QgsGeometry.fromPointXY(feature.geometry().pointOnSurface())
@@ -97,38 +97,38 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
                 point_feature.setAttributes(feature.attributes())
                 output_point_layer.addFeature(point_feature, QgsFeatureSink.FastInsert)
 
-            # Atualizar o progresso a cada lote processado
+            #Atualizar o progresso a cada lote processado
             current_count += 1
             if current_count % step == 0:
                 feedback.setProgress(int(current_count / total_count * 100))
 
-        # Transformar a camada de linha em pontos
+        #Transformar a camada de linha em pontos
         self.create_point_layer_from_line_layer(input_line_layer, output_point_layer)
 
-        # Validar os pontos e plotar erros
+        #Validar os pontos e plotar erros
         self.validate_points()
 
-        # Retorna resultados
+        #Retorna resultados
         return {self.OUTPUT_POINT_LAYER: output_point_layer}
 
     def create_point_layer_from_line_layer(self, line_layer, output_point_layer):
-        # Cria uma nova camada de ponto
+        #Cria uma nova camada de ponto
         point_layer = QgsVectorLayer('Point?crs=' + line_layer.crs().authid(), output_point_layer.name(), 'memory')
         point_layer_data = point_layer.dataProvider()
 
-        # Copia todos os campos da camada de linha para a camada de ponto
+        #Copia todos os campos da camada de linha para a camada de ponto
         point_layer_data.addAttributes(line_layer.fields().toList())
         point_layer.updateFields()
 
         point_layer.startEditing()
 
-        # Percorre todos os recursos na camada de linha
+        #Percorre todos os recursos na camada de linha
         for feature in line_layer.getFeatures():
             geometry = feature.geometry()
             if geometry is None:
                 continue
 
-            # Obtém os vértices da linha
+            #Obtém os vértices da linha
             for vertex in geometry.vertices():
                 point_feature = QgsFeature(point_layer.fields())
                 point_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(vertex.x(), vertex.y())))
@@ -137,28 +137,28 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
 
         point_layer.commitChanges()
 
-        # Adiciona a nova camada de ponto ao projeto QGIS
+        #Adiciona a nova camada de ponto ao projeto QGIS
         QgsProject.instance().addMapLayer(point_layer)
         print(f"Camada de ponto '{output_point_layer.name()}' criada a partir da camada de linha '{line_layer.name()}'.")
 
     def validate_points(self):
-        # Obter as camadas
+        #Obter as camadas
         infra_elemento_viario_p = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_elemento_viario_p")[0]
         infra_via_deslocamento_p = QgsProject.instance().mapLayersByName("infra_via_deslocamento_p")[0]
 
-        # Filtrar pontos da camada infra_elemento_viario_p com tipo = 203
+        #Filtrar pontos da camada infra_elemento_viario_p com tipo = 203
         infra_elemento_viario_p_203 = {feat.id(): feat for feat in infra_elemento_viario_p.getFeatures() if feat["tipo"] == 203}
 
-        # Verificar pontos que satisfazem a regra 3
+        #Verificar pontos que satisfazem a regra 3
         common_ids = set(infra_elemento_viario_p_203.keys()) & {feat.id() for feat in infra_via_deslocamento_p.getFeatures()}
 
-        # Verificar pontos que satisfazem a regra 4
+        #Verificar pontos que satisfazem a regra 4
         via_deslocamento_layer = QgsProject.instance().mapLayersByName("dados_projeto4_2024 — infra_via_deslocamento_l")[0]
         vertices_via_deslocamento = {QgsPointXY(vertex.x(), vertex.y()) for feature in via_deslocamento_layer.getFeatures() for vertex in feature.geometry().vertices()}
 
         valid_points = {feat_id for feat_id in common_ids if QgsPointXY(infra_elemento_viario_p_203[feat_id].geometry().asPoint()) in vertices_via_deslocamento}
 
-        # Verificar atributos nr_pistas, nr_faixas e situacao_fisica
+        #Verificar atributos nr_pistas, nr_faixas e situacao_fisica
         error_layer = QgsVectorLayer("Point?crs=" + infra_via_deslocamento_p.crs().authid(), "Erro_Regra_5", "memory")
         error_provider = error_layer.dataProvider()
 
@@ -206,7 +206,7 @@ class ValidateAndCorrectFeaturesAlgorithm(QgsProcessingAlgorithm):
     def shortHelpString(self):
         return self.tr("This algorithm validates and corrects features based on specified rules.")
 
-# Registrar o algoritmo para que seja exibido na interface de processamento do QGIS
+#Registrar o algoritmo para que seja exibido na interface de processamento do QGIS
 processing.registry().addAlgorithm(ValidateAndCorrectFeaturesAlgorithm())
 
 '''
