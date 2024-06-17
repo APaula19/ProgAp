@@ -498,10 +498,10 @@ class CriarCamadasCurvasNivelMod(QgsProcessingAlgorithm):
         return self.tr('Criar Camadas de Curvas de Nível Modificadas')
 
     def group(self):
-        return self.tr('Exemplo Scripts')
+        return self.tr('Projeto 2')
 
     def groupId(self):
-        return 'examplescripts'
+        return 'Projeto2'
 
     def shortHelpString(self):
         return self.tr('Este algoritmo cria camadas de curvas de nível modificadas com base na escala selecionada.')
