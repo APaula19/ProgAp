@@ -1,3 +1,3 @@
-# programacao aplicada IME Grupo 3
+# Programação aplicada IME Grupo 3
 Projetos da matéria de programação aplicada 
 
