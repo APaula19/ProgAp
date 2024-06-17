@@ -53,19 +53,19 @@ class ValidateAndCreatePointsAlgorithm1(QgsProcessingAlgorithm):
         )
 
     def processAlgorithm(self, parameters, context, feedback):
-        # Obter os parâmetros
+        #Obter os parâmetros
         massa_dagua_layer = self.parameterAsVectorLayer(parameters, self.INPUT_MASSA_DAGUA_LAYER, context)
         barragem_layer = self.parameterAsVectorLayer(parameters, self.INPUT_BARRAGEM_LAYER, context)
         output_point_layer = self.parameterAsSink(parameters, self.OUTPUT_POINT_LAYER, context, QgsFields(), QgsWkbTypes.Point, massa_dagua_layer.crs())
         classify_features = self.parameterAsBool(parameters, self.CLASSIFY_FEATURES, context)
 
-        # Validar bordas de massa d'água
+        #Validar bordas de massa d'água
         invalid_features = self.validate_borda_intersections(massa_dagua_layer, barragem_layer, feedback)
 
-        # Criar pontos conforme condições da barragem
+        #Criar pontos conforme condições da barragem
         self.create_points_from_barragem(barragem_layer, output_point_layer, classify_features)
 
-        # Retorna resultados
+        #Retorna resultados
         return {self.OUTPUT_POINT_LAYER: output_point_layer}
 
     def validate_borda_intersections(self, massa_dagua_layer, barragem_layer, feedback):
@@ -120,7 +120,7 @@ class ValidateAndCreatePointsAlgorithm1(QgsProcessingAlgorithm):
 
             massa_dagua_layer.updateFeature(massa_dagua_feature)
 
-            # Atualizar progresso a cada feição processada
+            #Atualizar progresso a cada feição processada
             current_count += 1
             feedback.setProgress(int(current_count / total_count * 100))
 
@@ -134,7 +134,7 @@ class ValidateAndCreatePointsAlgorithm1(QgsProcessingAlgorithm):
         return invalid_features
 
     def create_points_from_barragem(self, barragem_layer, output_point_layer, classify_features):
-        # Obter IDs sobrepostos
+        #Obter IDs sobrepostos
         sobrepostos_ids = set()
         via_deslocamento_layer = QgsProject.instance().mapLayersByName('dados_projeto4_2024 — infra_via_deslocamento_l')[0]
         via_deslocamento_ids = set(feature.id() for feature in via_deslocamento_layer.getFeatures())
@@ -143,13 +143,13 @@ class ValidateAndCreatePointsAlgorithm1(QgsProcessingAlgorithm):
             if feature.id() in via_deslocamento_ids:
                 sobrepostos_ids.add(feature.id())
 
-        # Criar pontos na camada de saída
+        #Criar pontos no output
         fields = QgsFields()
         fields.append(QgsField('id', QVariant.Int))
         fields.append(QgsField('Classificação', QVariant.String))
 
         for feature in barragem_layer.getFeatures():
-            # Adicionar pontos conforme condições
+            #Adicionar pontos conforme condições
             if feature.id() in sobrepostos_ids and feature['sobreposto_transportes'] != 1:
                 self.add_point_feature(output_point_layer, feature, 'Erro 7')
 
@@ -192,7 +192,7 @@ class ValidateAndCreatePointsAlgorithm1(QgsProcessingAlgorithm):
     def shortHelpString(self):
         return self.tr("This algorithm validates borders and creates points based on specified conditions.")
 
-# Registrar o algoritmo para que seja exibido na interface de processamento do QGIS
+#Registrar o algoritmo para que seja exibido na interface de processamento do QGIS
 processing.registry().addAlgorithm(ValidateAndCreatePointsAlgorithm1())
 
 '''Código sem o uso de processing separado por regras
